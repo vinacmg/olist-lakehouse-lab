@@ -1,0 +1,6 @@
+README.md
+**/*.pdf
+data/*
+.env
+**/.DS_Store
+docs/*
