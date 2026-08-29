@@ -158,8 +158,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: ${SILO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
+      MINIO_ROOT_USER: ${ADMIN_USER}
+      MINIO_ROOT_PASSWORD: ${ADMIN_PASSWORD}
     command: server /data --console-address ":9001"
     volumes:
       - silo_data:/data
@@ -176,20 +176,24 @@ services:
   silo-init:
     image: pgsty/mc:latest
     environment:
-      SILO_ROOT_USER: ${SILO_ROOT_USER}
-      SILO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
-      LAKEHOUSE_SILO_USER: ${LAKEHOUSE_SILO_USER}
-      LAKEHOUSE_SILO_PASSWORD: ${LAKEHOUSE_SILO_PASSWORD}
+      ADMIN_USER: ${ADMIN_USER}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      LAKEHOUSE_USER: ${LAKEHOUSE_USER}
+      LAKEHOUSE_PASSWORD: ${LAKEHOUSE_PASSWORD}
+      ANALYTICS_USER: ${ANALYTICS_USER}
+      ANALYTICS_PASSWORD: ${ANALYTICS_PASSWORD}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        mc alias set local http://silo:9000 "$${SILO_ROOT_USER}" "$${SILO_ROOT_PASSWORD}" &&
+        mc alias set local http://silo:9000 "$${ADMIN_USER}" "$${ADMIN_PASSWORD}" &&
         mc mb --ignore-existing local/bronze &&
         mc mb --ignore-existing local/silver &&
         mc mb --ignore-existing local/gold &&
         mc mb --ignore-existing local/checkpoints &&
-        (mc admin user add local "$${LAKEHOUSE_SILO_USER}" "$${LAKEHOUSE_SILO_PASSWORD}" || true) &&
-        mc admin policy attach local readwrite --user "$${LAKEHOUSE_SILO_USER}"
+        (mc admin user add local "$${LAKEHOUSE_USER}" "$${LAKEHOUSE_PASSWORD}" || true) &&
+        mc admin policy attach local readwrite --user "$${LAKEHOUSE_USER}" &&
+        (mc admin user add local "$${ANALYTICS_USER}" "$${ANALYTICS_PASSWORD}" || true) &&
+        mc admin policy attach local readonly --user "$${ANALYTICS_USER}"
     depends_on:
       silo:
         condition: service_healthy
@@ -200,12 +204,13 @@ services:
     ports:
       - "8181:8181"
     environment:
-      AWS_ACCESS_KEY_ID: ${LAKEHOUSE_SILO_USER}
-      AWS_SECRET_ACCESS_KEY: ${LAKEHOUSE_SILO_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${LAKEHOUSE_USER}
+      AWS_SECRET_ACCESS_KEY: ${LAKEHOUSE_PASSWORD}
       AWS_REGION: sa-east-1
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://silo:9000
       CATALOG_WAREHOUSE: s3://bronze/
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
     depends_on:
       silo-init:
         condition: service_completed_successfully
@@ -225,6 +230,54 @@ services:
       iceberg-rest:
         condition: service_healthy
     restart: "no"
+
+  spark-master:
+    build:
+      context: ../spark
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.master.Master
+    ports:
+      - "7077:7077"
+      - "8082:8080"
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+    cpus: 1.0
+    mem_limit: 1g
+
+  spark-worker:
+    build:
+      context: ../spark
+    command: >
+      /opt/spark/bin/spark-class
+      org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077
+    environment:
+      SPARK_NO_DAEMONIZE: "true"
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      AWS_ACCESS_KEY_ID: ${LAKEHOUSE_USER}
+      AWS_SECRET_ACCESS_KEY: ${LAKEHOUSE_PASSWORD}
+      AWS_REGION: sa-east-1
+    depends_on:
+      - spark-master
+    volumes:
+      - ../spark/jobs:/opt/spark/jobs:ro
+    cpus: 2.0
+    mem_limit: 2500m
+
+  trino:
+    image: trinodb/trino:483
+    ports:
+      - "8084:8080"
+    environment:
+      LAKEHOUSE_USER: ${LAKEHOUSE_USER}
+      LAKEHOUSE_PASSWORD: ${LAKEHOUSE_PASSWORD}
+    volumes:
+      - ./trino/catalog:/etc/trino/catalog:ro
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
 
 volumes:
   pgdata:
