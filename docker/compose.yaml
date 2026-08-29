@@ -152,6 +152,81 @@ services:
       connect:
         condition: service_healthy
 
+  silo:
+    image: pgsty/silo:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${SILO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
+    command: server /data --console-address ":9001"
+    volumes:
+      - silo_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -f http://localhost:9000/minio/health/live || exit 1"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  silo-init:
+    image: pgsty/mc:latest
+    environment:
+      SILO_ROOT_USER: ${SILO_ROOT_USER}
+      SILO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD}
+      LAKEHOUSE_SILO_USER: ${LAKEHOUSE_SILO_USER}
+      LAKEHOUSE_SILO_PASSWORD: ${LAKEHOUSE_SILO_PASSWORD}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mc alias set local http://silo:9000 "$${SILO_ROOT_USER}" "$${SILO_ROOT_PASSWORD}" &&
+        mc mb --ignore-existing local/bronze &&
+        mc mb --ignore-existing local/silver &&
+        mc mb --ignore-existing local/gold &&
+        mc mb --ignore-existing local/checkpoints &&
+        (mc admin user add local "$${LAKEHOUSE_SILO_USER}" "$${LAKEHOUSE_SILO_PASSWORD}" || true) &&
+        mc admin policy attach local readwrite --user "$${LAKEHOUSE_SILO_USER}"
+    depends_on:
+      silo:
+        condition: service_healthy
+    restart: "no"
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:latest
+    ports:
+      - "8181:8181"
+    environment:
+      AWS_ACCESS_KEY_ID: ${LAKEHOUSE_SILO_USER}
+      AWS_SECRET_ACCESS_KEY: ${LAKEHOUSE_SILO_PASSWORD}
+      AWS_REGION: sa-east-1
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://silo:9000
+      CATALOG_WAREHOUSE: s3://bronze/
+    depends_on:
+      silo-init:
+        condition: service_completed_successfully
+
+  catalog-init:
+    image: curlimages/curl:latest
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for ns in bronze silver gold; do
+          curl -i -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"namespace\":[\"$${ns}\"],\"properties\":{\"location\":\"s3://$${ns}/\"}}" \
+            http://iceberg-rest:8181/v1/namespaces
+        done
+    depends_on:
+      iceberg-rest:
+        condition: service_healthy
+    restart: "no"
+
 volumes:
   pgdata:
   kafka_data:
+  silo_data:
