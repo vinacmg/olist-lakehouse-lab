@@ -1,9 +1,11 @@
-FROM apache/spark:4.0.1
+ARG SPARK_VERSION
+FROM apache/spark:${SPARK_VERSION}
 
 USER root
 
-ARG ICEBERG_VERSION=1.11.0
-ARG POSTGRES_JDBC_VERSION=42.7.7
+ARG SPARK_VERSION
+ARG ICEBERG_VERSION
+ARG POSTGRES_JDBC_VERSION
 
 RUN mkdir -p /opt/spark/jobs /opt/spark/conf
 
@@ -19,6 +21,6 @@ RUN curl -fL \
 
 ENV PATH="/opt/spark/bin:${PATH}"
 
-COPY conf/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
+COPY spark/conf/spark-defaults.conf /opt/spark/conf/spark-defaults.conf
 
 USER spark

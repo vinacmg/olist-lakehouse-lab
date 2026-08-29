@@ -1,4 +1,4 @@
-COMPOSE = docker compose --env-file .env -f docker/compose.yaml
+COMPOSE = docker compose --env-file docker/build.env --env-file .env -f docker/compose.yaml
 
 .PHONY: up postgres-up postgres-stop postgres-logs simulator-up simulator-stop ps down-v
 
