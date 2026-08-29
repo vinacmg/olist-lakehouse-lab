@@ -1,0 +1,29 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+
+  "database.hostname": "postgres",
+  "database.port": "5432",
+  "database.user": "${POSTGRES_USER}",
+  "database.password": "${POSTGRES_PASSWORD}",
+  "database.dbname": "${POSTGRES_DB}",
+
+  "topic.prefix": "olist",
+  "table.include.list": "ecommerce.orders,ecommerce.items,ecommerce.payments,ecommerce.reviews",
+
+  "plugin.name": "pgoutput",
+  "snapshot.mode": "initial",
+
+  "slot.name": "olist_debezium",
+  "publication.name": "olist_publication",
+
+  "schema.name.adjustment.mode": "avro",
+  "field.name.adjustment.mode": "avro",
+
+  "key.converter": "io.apicurio.registry.utils.converter.AvroConverter",
+  "key.converter.apicurio.registry.url": "http://schema-registry:8080/apis/registry/v2",
+  "key.converter.apicurio.registry.auto-register": "true",
+
+  "value.converter": "io.apicurio.registry.utils.converter.AvroConverter",
+  "value.converter.apicurio.registry.url": "http://schema-registry:8080/apis/registry/v2",
+  "value.converter.apicurio.registry.auto-register": "true"
+}
