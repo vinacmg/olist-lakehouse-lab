@@ -16,6 +16,8 @@ x-airflow-common: &airflow-common
       SPARK_VERSION: ${SPARK_VERSION}
       ICEBERG_VERSION: ${ICEBERG_VERSION}
       POSTGRES_JDBC_VERSION: ${POSTGRES_JDBC_VERSION}
+      DEEQU_VERSION: ${DEEQU_VERSION}
+      PYDEEQU_COMMIT: ${PYDEEQU_COMMIT}
   user: "${AIRFLOW_UID:-50000}:0"
   environment: &airflow-common-environment
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
@@ -313,6 +315,32 @@ services:
       iceberg-rest:
         condition: service_healthy
 
+  lakehouse-init:
+    image: trinodb/trino:483
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for layer in bronze silver gold; do
+          for file in /ddl/"$${layer}"/*.sql; do
+            [ -e "$${file}" ] || continue
+
+            echo "Applying $${file}"
+
+            trino \
+              --server http://trino:8080 \
+              --file "$${file}" ||
+              exit 1
+          done
+        done
+    volumes:
+      - ./init/lakehouse:/ddl:ro
+    depends_on:
+      catalog-init:
+        condition: service_completed_successfully
+      trino:
+        condition: service_healthy
+    restart: "no"
+
   airflow-postgres:
     image: postgres:16
     environment:
@@ -368,6 +396,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      SPARK_VERSION: ${SPARK_VERSION}
       LAKEHOUSE_USER: ${LAKEHOUSE_USER}
       LAKEHOUSE_PASSWORD: ${LAKEHOUSE_PASSWORD}
       AWS_ACCESS_KEY_ID: ${LAKEHOUSE_USER}
@@ -388,6 +417,8 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_healthy
+      lakehouse-init:
+        condition: service_completed_successfully
     volumes:
       - ../airflow/dags:/opt/airflow/dags:ro
       - ../spark/jobs:/opt/spark/jobs:ro
@@ -409,7 +440,7 @@ services:
       airflow-postgres:
         condition: service_healthy
     volumes:
-    - ../airflow/dags:/opt/airflow/dags:ro
+      - ../airflow/dags:/opt/airflow/dags:ro
 
 volumes:
   pgdata:
